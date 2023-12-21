@@ -14,14 +14,14 @@ import (
 )
 
 type Hub struct {
-	messageBuffer  int
-	writeTimeout   time.Duration
-	publishLimiter *rate.Limiter
-	errorFunc      func(error)
-	topicFunc      func(*http.Request) []string
-	subscribersMu  sync.Mutex
-	subscribers    map[*subscriber]struct{}
-	topics         map[string]subscriptions
+	messageBuffer int
+	writeTimeout  time.Duration
+	limiter       *rate.Limiter
+	errorFunc     func(error)
+	topicFunc     func(*http.Request) []string
+	subscribersMu sync.RWMutex
+	subscribers   map[*subscriber]struct{}
+	topics        map[string]subscriptions
 }
 
 type subscriber struct {
@@ -36,9 +36,9 @@ type subscriptions struct {
 
 func NewHub() *Hub {
 	return &Hub{
-		messageBuffer:  16,
-		writeTimeout:   time.Second * 5,
-		publishLimiter: rate.NewLimiter(rate.Every(time.Millisecond*100), 8),
+		messageBuffer: 16,
+		writeTimeout:  time.Second * 5,
+		limiter:       rate.NewLimiter(rate.Every(time.Millisecond*100), 8),
 		errorFunc: func(err error) {
 			log.Panic(err)
 		},
@@ -142,17 +142,32 @@ func writeWithTimeout(ctx context.Context, c *websocket.Conn, timeout time.Durat
 	return c.Write(ctx, websocket.MessageText, msg)
 }
 
-func (h *Hub) Publish(msg []byte) {
-	h.publishLimiter.Wait(context.Background())
+func (h *Hub) Send(msg []byte) {
+	h.limiter.Wait(context.Background())
 
-	h.subscribersMu.Lock()
-	defer h.subscribersMu.Unlock()
+	h.subscribersMu.RLock()
+	defer h.subscribersMu.RUnlock()
 
 	for s := range h.subscribers {
 		select {
 		case s.msgs <- msg:
 		default:
 			go s.closeSlow()
+		}
+	}
+}
+
+func (h *Hub) SendTo(topic string, msg []byte) {
+	h.subscribersMu.RLock()
+	defer h.subscribersMu.RUnlock()
+
+	if sub, ok := h.topics[topic]; ok {
+		for s := range sub.subscribers {
+			select {
+			case s.msgs <- msg:
+			default:
+				go s.closeSlow()
+			}
 		}
 	}
 }
