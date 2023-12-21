@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -16,14 +17,21 @@ type Hub struct {
 	messageBuffer  int
 	writeTimeout   time.Duration
 	publishLimiter *rate.Limiter
-	errorHandler   func(error)
+	errorFunc      func(error)
+	topicFunc      func(*http.Request) []string
 	subscribersMu  sync.Mutex
 	subscribers    map[*subscriber]struct{}
+	topics         map[string]subscriptions
 }
 
 type subscriber struct {
 	msgs      chan []byte
 	closeSlow func()
+	topics    []string
+}
+
+type subscriptions struct {
+	subscribers map[*subscriber]struct{}
 }
 
 func NewHub() *Hub {
@@ -31,22 +39,28 @@ func NewHub() *Hub {
 		messageBuffer:  16,
 		writeTimeout:   time.Second * 5,
 		publishLimiter: rate.NewLimiter(rate.Every(time.Millisecond*100), 8),
+		errorFunc: func(err error) {
+			log.Panic(err)
+		},
+		topicFunc: func(r *http.Request) []string {
+			return nil
+		},
 	}
 }
 
 func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
-	err := h.handleWebsocket(w, r)
+	err := h.handleWebsocket(w, r, h.topicFunc(r))
 	if errors.Is(err, context.Canceled) ||
 		websocket.CloseStatus(err) == websocket.StatusNormalClosure ||
 		websocket.CloseStatus(err) == websocket.StatusGoingAway {
 		return
 	}
 	if err != nil {
-		h.errorHandler(err)
+		h.errorFunc(err)
 	}
 }
 
-func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request) error {
+func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request, topics []string) error {
 	var mu sync.Mutex
 	var conn *websocket.Conn
 	var closed bool
@@ -54,7 +68,8 @@ func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
 	s := &subscriber{
-		msgs: make(chan []byte, h.messageBuffer),
+		topics: topics,
+		msgs:   make(chan []byte, h.messageBuffer),
 		closeSlow: func() {
 			mu.Lock()
 			defer mu.Unlock()
@@ -99,13 +114,24 @@ func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request) error {
 func (h *Hub) addSubscriber(s *subscriber) {
 	h.subscribersMu.Lock()
 	h.subscribers[s] = struct{}{}
+	for _, t := range s.topics {
+		if subs, ok := h.topics[t]; ok {
+			subs.subscribers[s] = struct{}{}
+		} else {
+			h.topics[t] = subscriptions{subscribers: map[*subscriber]struct{}{s: {}}}
+		}
+	}
 	h.subscribersMu.Unlock()
 }
 
-// deleteSubscriber deletes the given subscriber.
 func (h *Hub) deleteSubscriber(s *subscriber) {
 	h.subscribersMu.Lock()
 	delete(h.subscribers, s)
+	for _, t := range s.topics {
+		if subs, ok := h.topics[t]; ok {
+			delete(subs.subscribers, s)
+		}
+	}
 	h.subscribersMu.Unlock()
 }
 
