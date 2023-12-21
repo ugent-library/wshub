@@ -1,1 +1,1 @@
-# wshub
+# ugent-library/hub
