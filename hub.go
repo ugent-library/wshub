@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,16 @@ import (
 	"golang.org/x/time/rate"
 	"nhooyr.io/websocket"
 )
+
+type Config struct {
+	MessageBuffer int
+	WriteTimeout  time.Duration
+	Limiter       *rate.Limiter
+	ErrorFunc     func(error)
+	UserFunc      func(*http.Request) (string, []string)
+	OnAddUser     map[string]func(string, Subscription)
+	OnRemoveUser  map[string]func(string, Subscription)
+}
 
 type Hub struct {
 	id            string
@@ -23,12 +34,14 @@ type Hub struct {
 	subscribersMu sync.RWMutex
 	subscribers   map[*subscriber]struct{}
 	topics        map[string]subscriptions
+	onAddUser     map[string]func(string, Subscription)
+	onRemoveUser  map[string]func(string, Subscription)
 }
 
 type subscriptions struct {
 	subscribers  map[string]Subscription
 	users        map[string]int
-	onNewUser    func(string, Subscription)
+	onAddUser    func(string, Subscription)
 	onRemoveUser func(string, Subscription)
 }
 
@@ -62,18 +75,36 @@ func (s *subscriber) Send(msg []byte) {
 	}
 }
 
-func NewHub() *Hub {
+func NewHub(c Config) *Hub {
+	if c.MessageBuffer == 0 {
+		c.MessageBuffer = 16
+	}
+	if c.WriteTimeout == 0 {
+		c.WriteTimeout = time.Second * 5
+	}
+	if c.Limiter == nil {
+		c.Limiter = rate.NewLimiter(rate.Every(time.Millisecond*100), 8)
+	}
+	if c.ErrorFunc == nil {
+		c.ErrorFunc = func(err error) {
+			panic(err)
+		}
+	}
+	if c.UserFunc == nil {
+		c.UserFunc = func(r *http.Request) (string, []string) {
+			return "", nil
+		}
+	}
+
 	return &Hub{
 		id:            uuid.NewString(),
-		messageBuffer: 16,
-		writeTimeout:  time.Second * 5,
-		limiter:       rate.NewLimiter(rate.Every(time.Millisecond*100), 8),
-		errorFunc: func(err error) {
-			panic(err)
-		},
-		userFunc: func(r *http.Request) (string, []string) {
-			return "", nil
-		},
+		messageBuffer: c.MessageBuffer,
+		writeTimeout:  c.WriteTimeout,
+		limiter:       c.Limiter,
+		errorFunc:     c.ErrorFunc,
+		userFunc:      c.UserFunc,
+		onAddUser:     c.OnAddUser,
+		onRemoveUser:  c.OnRemoveUser,
 	}
 }
 
@@ -150,12 +181,12 @@ func (h *Hub) addSubscription(topic string, s Subscription) func() {
 		n := subs.users[s.UserID()]
 		subs.users[s.UserID()] = n + 1
 
-		if subs.onNewUser != nil && n == 0 {
+		if subs.onAddUser != nil && n == 0 {
 			return func() {
 				h.subscribersMu.RLock()
 				defer h.subscribersMu.RUnlock()
 				for _, sub := range subs.subscribers {
-					subs.onNewUser(s.UserID(), sub)
+					subs.onAddUser(s.UserID(), sub)
 				}
 			}
 		}
@@ -166,11 +197,30 @@ func (h *Hub) addSubscription(topic string, s Subscription) func() {
 		subscribers: map[string]Subscription{s.ID(): s},
 		users:       map[string]int{s.UserID(): 1},
 	}
+
+	// find handlers for topic by matching longest prefix
+	// TODO make more efficient
+	var longestAddUserPrefix string
+	for prefix := range h.onAddUser {
+		if strings.HasPrefix(topic, prefix) && len(prefix) > len(longestAddUserPrefix) {
+			longestAddUserPrefix = prefix
+		}
+	}
+	subs.onAddUser = h.onAddUser[longestAddUserPrefix]
+
+	var longestRemoveUserPrefix string
+	for prefix := range h.onRemoveUser {
+		if strings.HasPrefix(topic, prefix) && len(prefix) > len(longestRemoveUserPrefix) {
+			longestRemoveUserPrefix = prefix
+		}
+	}
+	subs.onRemoveUser = h.onRemoveUser[longestRemoveUserPrefix]
+
 	h.topics[topic] = subs
 
 	return func() {
 		h.subscribersMu.RLock()
-		subs.onNewUser(s.UserID(), s)
+		subs.onAddUser(s.UserID(), s)
 		h.subscribersMu.RUnlock()
 
 	}
@@ -242,7 +292,7 @@ func writeWithTimeout(ctx context.Context, c *websocket.Conn, timeout time.Durat
 	return c.Write(ctx, websocket.MessageText, msg)
 }
 
-func (h *Hub) Send(msg []byte) {
+func (h *Hub) Broadcast(msg []byte) {
 	h.limiter.Wait(context.Background())
 
 	h.subscribersMu.RLock()
@@ -253,7 +303,7 @@ func (h *Hub) Send(msg []byte) {
 	}
 }
 
-func (h *Hub) SendTo(topic string, msg []byte) {
+func (h *Hub) Send(topic string, msg []byte) {
 	h.subscribersMu.RLock()
 	defer h.subscribersMu.RUnlock()
 
