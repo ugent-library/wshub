@@ -9,24 +9,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"golang.org/x/time/rate"
 	"nhooyr.io/websocket"
 )
 
 type Config struct {
 	MessageBuffer int
 	WriteTimeout  time.Duration
-	Limiter       *rate.Limiter
-	ErrorFunc     func(error)
-	UserIDFunc    func(*http.Request) (string, []string)
-	Bridge        Bridge
+	// Limiter       *rate.Limiter
+	ErrorFunc  func(error)
+	UserIDFunc func(*http.Request) (string, []string)
+	Bridge     Bridge
 }
 
 type Hub struct {
 	id            string
 	messageBuffer int
 	writeTimeout  time.Duration
-	limiter       *rate.Limiter
+	// limiter       *rate.Limiter
 	errorFunc     func(error)
 	userIDFunc    func(*http.Request) (string, []string)
 	bridge        Bridge
@@ -58,9 +57,9 @@ func NewHub(c Config) *Hub {
 	if c.WriteTimeout == 0 {
 		c.WriteTimeout = time.Second * 5
 	}
-	if c.Limiter == nil {
-		c.Limiter = rate.NewLimiter(rate.Every(time.Millisecond*100), 8)
-	}
+	// if c.Limiter == nil {
+	// 	c.Limiter = rate.NewLimiter(rate.Every(time.Millisecond*100), 8)
+	// }
 	if c.ErrorFunc == nil {
 		c.ErrorFunc = func(err error) {
 			panic(err)
@@ -76,11 +75,11 @@ func NewHub(c Config) *Hub {
 		id:            uuid.NewString(),
 		messageBuffer: c.MessageBuffer,
 		writeTimeout:  c.WriteTimeout,
-		limiter:       c.Limiter,
-		errorFunc:     c.ErrorFunc,
-		userIDFunc:    c.UserIDFunc,
-		bridge:        c.Bridge,
-		presenceMap:   newPresenceMap(),
+		// limiter:       c.Limiter,
+		errorFunc:   c.ErrorFunc,
+		userIDFunc:  c.UserIDFunc,
+		bridge:      c.Bridge,
+		presenceMap: newPresenceMap(),
 	}
 
 	if h.bridge != nil {

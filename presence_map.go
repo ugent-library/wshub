@@ -5,12 +5,12 @@ import (
 	"time"
 )
 
+// TODO reuse maps with pool
 type presenceMap struct {
 	ttl    time.Duration
 	topics map[string]map[string]int64
-	// usersPool      *sync.Pool
-	mu   sync.RWMutex
-	stop chan bool
+	mu     sync.RWMutex
+	stop   chan bool
 }
 
 func newPresenceMap() *presenceMap {
