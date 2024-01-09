@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -19,9 +18,8 @@ type Config struct {
 	WriteTimeout  time.Duration
 	Limiter       *rate.Limiter
 	ErrorFunc     func(error)
-	UserFunc      func(*http.Request) (string, []string)
-	OnAddUser     map[string]func(string, Subscription)
-	OnRemoveUser  map[string]func(string, Subscription)
+	UserIDFunc    func(*http.Request) (string, []string)
+	Bridge        Bridge
 }
 
 type Hub struct {
@@ -30,25 +28,19 @@ type Hub struct {
 	writeTimeout  time.Duration
 	limiter       *rate.Limiter
 	errorFunc     func(error)
-	userFunc      func(*http.Request) (string, []string)
+	userIDFunc    func(*http.Request) (string, []string)
+	bridge        Bridge
 	subscribersMu sync.RWMutex
 	subscribers   map[*subscriber]struct{}
-	topics        map[string]subscriptions
-	onAddUser     map[string]func(string, Subscription)
-	onRemoveUser  map[string]func(string, Subscription)
+	topics        map[string]map[*subscriber]struct{}
+	presenceMap   *presenceMap
 }
 
-type subscriptions struct {
-	subscribers  map[string]Subscription
-	users        map[string]int
-	onAddUser    func(string, Subscription)
-	onRemoveUser func(string, Subscription)
-}
-
-type Subscription interface {
-	ID() string
-	UserID() string
-	Send([]byte)
+type Bridge interface {
+	Send(string, string, []byte)
+	Receive(string, func(string, []byte))
+	SendHeartbeat(string, string, []string)
+	ReceiveHeartbeat(string, func(string, []string))
 }
 
 type subscriber struct {
@@ -57,22 +49,6 @@ type subscriber struct {
 	closeSlow func()
 	userID    string
 	topics    []string
-}
-
-func (s *subscriber) ID() string {
-	return s.id
-}
-
-func (s *subscriber) UserID() string {
-	return s.userID
-}
-
-func (s *subscriber) Send(msg []byte) {
-	select {
-	case s.msgs <- msg:
-	default:
-		go s.closeSlow()
-	}
 }
 
 func NewHub(c Config) *Hub {
@@ -90,22 +66,29 @@ func NewHub(c Config) *Hub {
 			panic(err)
 		}
 	}
-	if c.UserFunc == nil {
-		c.UserFunc = func(r *http.Request) (string, []string) {
+	if c.UserIDFunc == nil {
+		c.UserIDFunc = func(r *http.Request) (string, []string) {
 			return "", nil
 		}
 	}
 
-	return &Hub{
+	h := &Hub{
 		id:            uuid.NewString(),
 		messageBuffer: c.MessageBuffer,
 		writeTimeout:  c.WriteTimeout,
 		limiter:       c.Limiter,
 		errorFunc:     c.ErrorFunc,
-		userFunc:      c.UserFunc,
-		onAddUser:     c.OnAddUser,
-		onRemoveUser:  c.OnRemoveUser,
+		userIDFunc:    c.UserIDFunc,
+		bridge:        c.Bridge,
+		presenceMap:   newPresenceMap(),
 	}
+
+	if h.bridge != nil {
+		h.bridge.Receive(h.id, h.Send)
+		h.bridge.ReceiveHeartbeat(h.id, h.heartbeat)
+	}
+
+	return h
 }
 
 func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +104,7 @@ func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request) error {
-	userID, topics := h.userFunc(r)
+	userID, topics := h.userIDFunc(r)
 
 	var mu sync.Mutex
 	var conn *websocket.Conn
@@ -162,6 +145,24 @@ func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request) error {
 
 	ctx = conn.CloseRead(ctx)
 
+	// heartbeat
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if h.bridge != nil {
+					h.bridge.SendHeartbeat(h.id, userID, topics)
+				}
+				h.heartbeat(userID, topics)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	for {
 		select {
 		case msg := <-s.msgs:
@@ -175,114 +176,38 @@ func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request) error {
 	}
 }
 
-func (h *Hub) addSubscription(topic string, s Subscription) func() {
-	if subs, ok := h.topics[topic]; ok {
-		subs.subscribers[s.ID()] = s
-		n := subs.users[s.UserID()]
-		subs.users[s.UserID()] = n + 1
-
-		if subs.onAddUser != nil && n == 0 {
-			return func() {
-				h.subscribersMu.RLock()
-				defer h.subscribersMu.RUnlock()
-				for _, sub := range subs.subscribers {
-					subs.onAddUser(s.UserID(), sub)
-				}
-			}
-		}
-		return nil
-	}
-
-	subs := subscriptions{
-		subscribers: map[string]Subscription{s.ID(): s},
-		users:       map[string]int{s.UserID(): 1},
-	}
-
-	// find handlers for topic by matching longest prefix
-	// TODO make more efficient
-	var longestAddUserPrefix string
-	for prefix := range h.onAddUser {
-		if strings.HasPrefix(topic, prefix) && len(prefix) > len(longestAddUserPrefix) {
-			longestAddUserPrefix = prefix
-		}
-	}
-	subs.onAddUser = h.onAddUser[longestAddUserPrefix]
-
-	var longestRemoveUserPrefix string
-	for prefix := range h.onRemoveUser {
-		if strings.HasPrefix(topic, prefix) && len(prefix) > len(longestRemoveUserPrefix) {
-			longestRemoveUserPrefix = prefix
-		}
-	}
-	subs.onRemoveUser = h.onRemoveUser[longestRemoveUserPrefix]
-
-	h.topics[topic] = subs
-
-	return func() {
-		h.subscribersMu.RLock()
-		subs.onAddUser(s.UserID(), s)
-		h.subscribersMu.RUnlock()
-
+func (h *Hub) heartbeat(userID string, topics []string) {
+	for _, topic := range topics {
+		h.presenceMap.Add(topic, userID)
 	}
 }
 
 func (h *Hub) addSubscriber(s *subscriber) {
-	var thunks []func()
-
 	h.subscribersMu.Lock()
+
 	h.subscribers[s] = struct{}{}
 
 	for _, topic := range s.topics {
-		if thunk := h.addSubscription(topic, s); thunk != nil {
-			thunks = append(thunks, thunk)
+		if subs, ok := h.topics[topic]; ok {
+			subs[s] = struct{}{}
+		} else {
+			h.topics[topic] = map[*subscriber]struct{}{s: {}}
 		}
 	}
 
 	h.subscribersMu.Unlock()
-
-	for _, thunk := range thunks {
-		thunk()
-	}
 }
 
 func (h *Hub) deleteSubscriber(s *subscriber) {
-	var thunks []func()
-
 	h.subscribersMu.Lock()
 
 	delete(h.subscribers, s)
 
 	for _, topic := range s.topics {
-		if subs, ok := h.topics[topic]; ok {
-			delete(subs.subscribers, s.id)
-			n := subs.users[s.userID] - 1
-			if n == 0 {
-				delete(subs.users, s.userID)
-			} else {
-				subs.users[s.userID] = n
-			}
-
-			if len(subs.subscribers) == 0 {
-				delete(h.topics, topic)
-			}
-
-			if subs.onRemoveUser != nil && n == 0 {
-				thunks = append(thunks, func() {
-					h.subscribersMu.RLock()
-					defer h.subscribersMu.RUnlock()
-					for _, sub := range subs.subscribers {
-						subs.onRemoveUser(s.UserID(), sub)
-					}
-				})
-			}
-		}
+		delete(h.topics[topic], s)
 	}
 
 	h.subscribersMu.Unlock()
-
-	for _, thunk := range thunks {
-		thunk()
-	}
 }
 
 func writeWithTimeout(ctx context.Context, c *websocket.Conn, timeout time.Duration, msg []byte) error {
@@ -292,24 +217,24 @@ func writeWithTimeout(ctx context.Context, c *websocket.Conn, timeout time.Durat
 	return c.Write(ctx, websocket.MessageText, msg)
 }
 
-func (h *Hub) Broadcast(msg []byte) {
-	h.limiter.Wait(context.Background())
-
-	h.subscribersMu.RLock()
-	defer h.subscribersMu.RUnlock()
-
-	for s := range h.subscribers {
-		s.Send(msg)
-	}
-}
-
 func (h *Hub) Send(topic string, msg []byte) {
-	h.subscribersMu.RLock()
-	defer h.subscribersMu.RUnlock()
+	// h.limiter.Wait(context.Background())
 
-	if sub, ok := h.topics[topic]; ok {
-		for _, s := range sub.subscribers {
-			s.Send(msg)
+	if h.bridge != nil {
+		h.bridge.Send(h.id, topic, msg)
+	}
+
+	h.subscribersMu.RLock()
+
+	if topic == "*" {
+		for s := range h.subscribers {
+			s.msgs <- msg
+		}
+	} else if subs, ok := h.topics[topic]; ok {
+		for s := range subs {
+			s.msgs <- msg
 		}
 	}
+
+	h.subscribersMu.RUnlock()
 }
