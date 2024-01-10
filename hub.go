@@ -16,9 +16,8 @@ type Config struct {
 	MessageBuffer int
 	WriteTimeout  time.Duration
 	// Limiter       *rate.Limiter
-	ErrorFunc  func(error)
-	UserIDFunc func(*http.Request) (string, []string)
-	Bridge     Bridge
+	ErrorFunc func(error)
+	Bridge    Bridge
 }
 
 type Hub struct {
@@ -27,7 +26,6 @@ type Hub struct {
 	writeTimeout  time.Duration
 	// limiter       *rate.Limiter
 	errorFunc     func(error)
-	userIDFunc    func(*http.Request) (string, []string)
 	bridge        Bridge
 	subscribersMu sync.RWMutex
 	subscribers   map[*subscriber]struct{}
@@ -50,7 +48,7 @@ type subscriber struct {
 	topics    []string
 }
 
-func NewHub(c Config) *Hub {
+func New(c Config) *Hub {
 	if c.MessageBuffer == 0 {
 		c.MessageBuffer = 16
 	}
@@ -65,11 +63,6 @@ func NewHub(c Config) *Hub {
 			panic(err)
 		}
 	}
-	if c.UserIDFunc == nil {
-		c.UserIDFunc = func(r *http.Request) (string, []string) {
-			return "", nil
-		}
-	}
 
 	h := &Hub{
 		id:            uuid.NewString(),
@@ -77,21 +70,22 @@ func NewHub(c Config) *Hub {
 		writeTimeout:  c.WriteTimeout,
 		// limiter:       c.Limiter,
 		errorFunc:   c.ErrorFunc,
-		userIDFunc:  c.UserIDFunc,
 		bridge:      c.Bridge,
+		subscribers: make(map[*subscriber]struct{}),
+		topics:      make(map[string]map[*subscriber]struct{}),
 		presenceMap: newPresenceMap(),
 	}
 
 	if h.bridge != nil {
-		h.bridge.Receive(h.id, h.Send)
+		h.bridge.Receive(h.id, h.send)
 		h.bridge.ReceiveHeartbeat(h.id, h.heartbeat)
 	}
 
 	return h
 }
 
-func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
-	err := h.handleWebsocket(w, r)
+func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request, userID string, topics []string) {
+	err := h.handleWebsocket(w, r, userID, topics)
 	if errors.Is(err, context.Canceled) ||
 		websocket.CloseStatus(err) == websocket.StatusNormalClosure ||
 		websocket.CloseStatus(err) == websocket.StatusGoingAway {
@@ -102,9 +96,7 @@ func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request) error {
-	userID, topics := h.userIDFunc(r)
-
+func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request, userID string, topics []string) error {
 	var mu sync.Mutex
 	var conn *websocket.Conn
 	var closed bool
@@ -223,6 +215,10 @@ func (h *Hub) Send(topic string, msg []byte) {
 		h.bridge.Send(h.id, topic, msg)
 	}
 
+	h.send(topic, msg)
+}
+
+func (h *Hub) send(topic string, msg []byte) {
 	h.subscribersMu.RLock()
 
 	if topic == "*" {

@@ -1,0 +1,18 @@
+{{define "head"}}
+<title>Chat - Room {{.Room}}</title>
+{{end}}
+
+{{define "main"}}
+<div hx-ext="ws" ws-connect="/room/{{.Room}}/user/{{.User}}/ws">
+    <form hx-post="/room/{{.Room}}" hx-swap="none">
+        <div class="input-group mb-3">
+            <input type="hidden" name="user" value="{{.User}}">
+            <input type="text" name="msg" class="form-control" placeholder="Type your message here" value="">
+            <button class="btn btn-outline-primary" type="submit">Send</button>
+        </div>
+    </form>
+
+    <ul id="messages">
+    </ul>
+</div>
+{{end}}
