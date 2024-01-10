@@ -34,7 +34,6 @@ func New(url string) (*Bridge, error) {
 
 // TODO error
 func (b *Bridge) Send(hubID, topic string, msg []byte) {
-	log.Printf("SEND BRIDGE %s: %s", topic, msg)
 	hdr := make(nats.Header)
 	hdr.Set("Hub-Id", hubID)
 	err := b.conn.PublishMsg(&nats.Msg{
@@ -52,7 +51,6 @@ func (b *Bridge) Receive(hubID string, fn func(string, []byte)) {
 	_, err := b.conn.Subscribe("hub.topic.>", func(msg *nats.Msg) {
 		if msg.Header.Get("Hub-Id") != hubID {
 			topic := strings.TrimPrefix(msg.Subject, "hub.topic.")
-			log.Printf("BRIDGED %s: %s", topic, msg.Data)
 			fn(topic, msg.Data)
 		}
 	})

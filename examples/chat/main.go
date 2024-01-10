@@ -6,6 +6,8 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -37,15 +39,22 @@ func main() {
 
 	r.Post("/room/{room}", func(w http.ResponseWriter, r *http.Request) {
 		chatHub.Send(chi.URLParam(r, "room"), []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+
-			r.FormValue("user")+`: `+r.FormValue("msg")+
+			`<span class="badge rounded-pill text-bg-secondary">`+
+			r.FormValue("user")+`</span> `+r.FormValue("msg")+
 			`</li></ul>`))
+	})
+
+	r.Get("/room/{room}/presence", func(w http.ResponseWriter, r *http.Request) {
+		users := chatHub.Presence(chi.URLParam(r, "room"))
+		sort.Strings(users)
+		for i, user := range users {
+			users[i] = `<span class="badge rounded-pill text-bg-info">` + user + `</span>`
+		}
+		w.Write([]byte(`<div id="users">` + strings.Join(users, " ") + `<div>`))
 	})
 
 	r.Get("/room/{room}/user/{user}/ws", func(w http.ResponseWriter, r *http.Request) {
 		chatHub.HandleWebsocket(w, r, chi.URLParam(r, "user"), []string{chi.URLParam(r, "room")})
-	})
-
-	r.Get("/room/{room}/user/{user}/precense", func(w http.ResponseWriter, r *http.Request) {
 	})
 
 	r.Get("/room/{room}/user/{user}", func(w http.ResponseWriter, r *http.Request) {

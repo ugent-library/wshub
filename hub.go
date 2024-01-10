@@ -208,6 +208,10 @@ func writeWithTimeout(ctx context.Context, c *websocket.Conn, timeout time.Durat
 	return c.Write(ctx, websocket.MessageText, msg)
 }
 
+func (h *Hub) Presence(topic string) []string {
+	return h.presenceMap.Get(topic)
+}
+
 func (h *Hub) Send(topic string, msg []byte) {
 	// h.limiter.Wait(context.Background())
 
