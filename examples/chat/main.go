@@ -20,6 +20,11 @@ var roomTmpl = template.Must(template.ParseFiles(
 	"./room.html.tmpl",
 ))
 
+var broadcastTmpl = template.Must(template.ParseFiles(
+	"./layout.html.tmpl",
+	"./broadcast.html.tmpl",
+))
+
 func main() {
 	var port int
 
@@ -36,6 +41,20 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+
+	r.Get("/broadcast", func(w http.ResponseWriter, r *http.Request) {
+		if err := broadcastTmpl.ExecuteTemplate(w, "layout", nil); err != nil {
+			log.Print(err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+	})
+
+	r.Post("/broadcast", func(w http.ResponseWriter, r *http.Request) {
+		chatHub.Send("*", []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+
+			`<div class="alert alert-primary" role="alert">`+
+			r.FormValue("msg")+
+			`</div></ul>`))
+	})
 
 	r.Post("/room/{room}", func(w http.ResponseWriter, r *http.Request) {
 		chatHub.Send(chi.URLParam(r, "room"), []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+

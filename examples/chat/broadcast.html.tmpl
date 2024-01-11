@@ -1,0 +1,14 @@
+{{define "head"}}
+<title>Chat - Broadcast</title>
+{{end}}
+
+{{define "main"}}
+<div class="container">
+    <form class="mb-2" hx-post="/broadcast" hx-swap="none">
+        <div class="input-group mb-3">
+            <input type="text" name="msg" class="form-control" placeholder="Type your message here" value="">
+            <button class="btn btn-outline-primary" type="submit">Send</button>
+        </div>
+    </form>
+</div>
+{{end}}
