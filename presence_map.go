@@ -1,4 +1,4 @@
-package hub
+package catbird
 
 import (
 	"sync"

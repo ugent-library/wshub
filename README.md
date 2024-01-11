@@ -1,1 +1,1 @@
-# ugent-library/hub
+# ugent-library/catbird

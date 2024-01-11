@@ -1,4 +1,4 @@
-module github.com/ugent-library/hub
+module github.com/ugent-library/catbird
 
 go 1.21.5
 

@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/ugent-library/hub"
-	"github.com/ugent-library/hub/natsbridge"
+	"github.com/ugent-library/catbird"
+	"github.com/ugent-library/catbird/natsbridge"
 )
 
 var roomTmpl = template.Must(template.ParseFiles(
@@ -30,7 +30,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	chatHub := hub.New(hub.Config{
+	chatHub := catbird.New(catbird.Config{
 		Bridge: bridge,
 	})
 
