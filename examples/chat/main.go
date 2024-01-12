@@ -35,7 +35,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	chatHub := catbird.New(catbird.Config{
+	hub := catbird.New(catbird.Config{
+		Secret: []byte("MuxdvYHUQyxbQ2jpf4QqR6Aydh068CZC"),
 		Bridge: bridge,
 	})
 
@@ -50,21 +51,21 @@ func main() {
 	})
 
 	r.Post("/broadcast", func(w http.ResponseWriter, r *http.Request) {
-		chatHub.Send("*", []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+
+		hub.Send("*", []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+
 			`<div class="alert alert-primary" role="alert">`+
 			r.FormValue("msg")+
 			`</div></ul>`))
 	})
 
 	r.Post("/room/{room}", func(w http.ResponseWriter, r *http.Request) {
-		chatHub.Send(chi.URLParam(r, "room"), []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+
+		hub.Send(chi.URLParam(r, "room"), []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+
 			`<span class="badge rounded-pill text-bg-secondary">`+
 			r.FormValue("user")+`</span> `+r.FormValue("msg")+
 			`</li></ul>`))
 	})
 
 	r.Get("/room/{room}/presence", func(w http.ResponseWriter, r *http.Request) {
-		users := chatHub.Presence(chi.URLParam(r, "room"))
+		users := hub.Presence(chi.URLParam(r, "room"))
 		sort.Strings(users)
 		for i, user := range users {
 			users[i] = `<span class="badge rounded-pill text-bg-info">` + user + `</span>`
@@ -73,7 +74,12 @@ func main() {
 	})
 
 	r.Get("/room/{room}/user/{user}/ws", func(w http.ResponseWriter, r *http.Request) {
-		chatHub.HandleWebsocket(w, r, chi.URLParam(r, "user"), []string{chi.URLParam(r, "room")})
+		token, err := hub.Encrypt(chi.URLParam(r, "user"), []string{chi.URLParam(r, "room")})
+		if err != nil {
+			log.Print(err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		hub.HandleWebsocket(w, r, token)
 	})
 
 	r.Get("/room/{room}/user/{user}", func(w http.ResponseWriter, r *http.Request) {
