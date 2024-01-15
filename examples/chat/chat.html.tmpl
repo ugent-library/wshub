@@ -3,9 +3,9 @@
 {{end}}
 
 {{define "main"}}
-<div class="container" hx-ext="ws" ws-connect="/room/{{.Room}}/user/{{.User}}/ws">
+<div class="container" hx-ext="ws" ws-connect="/ws?token={{.Token}}">
     <div class="mb-2 float-end"
-        hx-get="/room/{{.Room}}/presence"
+        hx-get="/presence?token={{.Token}}"
         hx-trigger="every 1s"
         hx-target="this"
         hx-swap="innerHTML"
@@ -13,9 +13,9 @@
         <div id="users"><span class="badge rounded-pill text-bg-info">{{.User}}</span></div>
     </div>
 
-    <form class="mb-2" hx-post="/room/{{.Room}}" hx-swap="none">
+    <form class="mb-2" hx-post="/chat" hx-swap="none">
         <div class="input-group mb-3">
-            <input type="hidden" name="user" value="{{.User}}">
+            <input type="hidden" name="token" value="{{.Token}}">
             <input type="text" name="msg" class="form-control" placeholder="Type your message here" value="">
             <button class="btn btn-outline-primary" type="submit">Send</button>
         </div>

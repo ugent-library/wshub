@@ -25,8 +25,7 @@ type Config struct {
 	// Secret should be a random 256 bit key.
 	Secret []byte
 	// Limiter       *rate.Limiter
-	ErrorFunc func(error)
-	Bridge    Bridge
+	Bridge Bridge
 }
 
 type Hub struct {
@@ -35,7 +34,6 @@ type Hub struct {
 	writeTimeout  time.Duration
 	secret        []byte
 	// limiter       *rate.Limiter
-	errorFunc     func(error)
 	bridge        Bridge
 	subscribersMu sync.RWMutex
 	subscribers   map[*subscriber]struct{}
@@ -68,11 +66,6 @@ func New(c Config) *Hub {
 	// if c.Limiter == nil {
 	// 	c.Limiter = rate.NewLimiter(rate.Every(time.Millisecond*100), 8)
 	// }
-	if c.ErrorFunc == nil {
-		c.ErrorFunc = func(err error) {
-			panic(err)
-		}
-	}
 
 	h := &Hub{
 		id:            uuid.NewString(),
@@ -80,7 +73,6 @@ func New(c Config) *Hub {
 		writeTimeout:  c.WriteTimeout,
 		secret:        c.Secret,
 		// limiter:       c.Limiter,
-		errorFunc:   c.ErrorFunc,
 		bridge:      c.Bridge,
 		subscribers: make(map[*subscriber]struct{}),
 		topics:      make(map[string]map[*subscriber]struct{}),
@@ -95,16 +87,14 @@ func New(c Config) *Hub {
 	return h
 }
 
-func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request, token string) {
+func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request, token string) error {
 	err := h.handleWebsocket(w, r, token)
 	if errors.Is(err, context.Canceled) ||
 		websocket.CloseStatus(err) == websocket.StatusNormalClosure ||
 		websocket.CloseStatus(err) == websocket.StatusGoingAway {
-		return
+		return nil
 	}
-	if err != nil {
-		h.errorFunc(err)
-	}
+	return err
 }
 
 func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request, token string) error {

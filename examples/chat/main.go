@@ -15,10 +15,21 @@ import (
 	"github.com/ugent-library/catbird/natsbridge"
 )
 
-var roomTmpl = template.Must(template.ParseFiles(
+var homeTmpl = template.Must(template.ParseFiles(
 	"./layout.html.tmpl",
-	"./room.html.tmpl",
+	"./home.html.tmpl",
 ))
+
+var chatTmpl = template.Must(template.ParseFiles(
+	"./layout.html.tmpl",
+	"./chat.html.tmpl",
+))
+
+type chatVars struct {
+	Token string
+	Room  string
+	User  string
+}
 
 var broadcastTmpl = template.Must(template.ParseFiles(
 	"./layout.html.tmpl",
@@ -43,29 +54,60 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 
-	r.Get("/broadcast", func(w http.ResponseWriter, r *http.Request) {
-		if err := broadcastTmpl.ExecuteTemplate(w, "layout", nil); err != nil {
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		if err := homeTmpl.ExecuteTemplate(w, "layout", nil); err != nil {
 			log.Print(err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
 	})
 
-	r.Post("/broadcast", func(w http.ResponseWriter, r *http.Request) {
-		hub.Send("*", []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+
-			`<div class="alert alert-primary" role="alert">`+
-			r.FormValue("msg")+
-			`</div></ul>`))
+	r.Post("/", func(w http.ResponseWriter, r *http.Request) {
+		token, err := hub.Encrypt(r.FormValue("user"), []string{r.FormValue("room")})
+		if err != nil {
+			log.Print(err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		vars := chatVars{
+			Token: token,
+			Room:  r.FormValue("room"),
+			User:  r.FormValue("user"),
+		}
+		if err := chatTmpl.ExecuteTemplate(w, "layout", vars); err != nil {
+			log.Print(err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
 	})
 
-	r.Post("/room/{room}", func(w http.ResponseWriter, r *http.Request) {
-		hub.Send(chi.URLParam(r, "room"), []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+
+	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if err := hub.HandleWebsocket(w, r, r.URL.Query().Get("token")); err != nil {
+			log.Print(err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+	})
+
+	r.Post("/chat", func(w http.ResponseWriter, r *http.Request) {
+		user, topics, err := hub.Decrypt(r.FormValue("token"))
+		if err != nil {
+			log.Print(err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		hub.Send(topics[0], []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+
 			`<span class="badge rounded-pill text-bg-secondary">`+
-			r.FormValue("user")+`</span> `+r.FormValue("msg")+
+			user+`</span> `+r.FormValue("msg")+
 			`</li></ul>`))
 	})
 
-	r.Get("/room/{room}/presence", func(w http.ResponseWriter, r *http.Request) {
-		users := hub.Presence(chi.URLParam(r, "room"))
+	r.Get("/presence", func(w http.ResponseWriter, r *http.Request) {
+		_, topics, err := hub.Decrypt(r.URL.Query().Get("token"))
+		if err != nil {
+			log.Print(err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		users := hub.Presence(topics[0])
 		sort.Strings(users)
 		for i, user := range users {
 			users[i] = `<span class="badge rounded-pill text-bg-info">` + user + `</span>`
@@ -73,28 +115,19 @@ func main() {
 		w.Write([]byte(`<div id="users">` + strings.Join(users, " ") + `<div>`))
 	})
 
-	r.Get("/room/{room}/user/{user}/ws", func(w http.ResponseWriter, r *http.Request) {
-		token, err := hub.Encrypt(chi.URLParam(r, "user"), []string{chi.URLParam(r, "room")})
-		if err != nil {
-			log.Print(err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		}
-		hub.HandleWebsocket(w, r, token)
-	})
+	// r.Get("/broadcast", func(w http.ResponseWriter, r *http.Request) {
+	// 	if err := broadcastTmpl.ExecuteTemplate(w, "layout", nil); err != nil {
+	// 		log.Print(err)
+	// 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	// 	}
+	// })
 
-	r.Get("/room/{room}/user/{user}", func(w http.ResponseWriter, r *http.Request) {
-		vars := &struct {
-			Room string
-			User string
-		}{
-			Room: chi.URLParam(r, "room"),
-			User: chi.URLParam(r, "user"),
-		}
-		if err := roomTmpl.ExecuteTemplate(w, "layout", vars); err != nil {
-			log.Print(err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		}
-	})
+	// r.Post("/broadcast", func(w http.ResponseWriter, r *http.Request) {
+	// 	hub.Send("*", []byte(`<ul id="messages" hx-swap-oob="beforeend"><li>`+
+	// 		`<div class="alert alert-primary" role="alert">`+
+	// 		r.FormValue("msg")+
+	// 		`</div></ul>`))
+	// })
 
 	addr := fmt.Sprintf("localhost:%d", port)
 	if err := http.ListenAndServe(addr, r); err != nil {

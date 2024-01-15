@@ -1,0 +1,15 @@
+{{define "head"}}
+<title>Chat - connect</title>
+{{end}}
+
+{{define "main"}}
+<div class="container">
+    <form class="mb-2" hx-post="/" hx-swap="none">
+        <div class="input-group mb-3">
+            <input type="text" name="user" class="form-control" placeholder="Your username" value="">
+            <input type="text" name="user" class="form-control" placeholder="Your room" value="">
+            <button class="btn btn-outline-primary" type="submit">Connect</button>
+        </div>
+    </form>
+</div>
+{{end}}
