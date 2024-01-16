@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// TODO reuse maps with pool
 type presenceMap struct {
 	ttl    time.Duration
 	topics map[string]map[string]int64
