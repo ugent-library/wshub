@@ -15,25 +15,27 @@ import (
 	"sync"
 	"time"
 
+	"log"
+
 	"github.com/google/uuid"
 	"nhooyr.io/websocket"
 )
 
 type Config struct {
+	ErrorHandler  func(error)
 	MessageBuffer int
 	WriteTimeout  time.Duration
 	// Secret should be a random 256 bit key.
 	Secret []byte
-	// Limiter       *rate.Limiter
 	Bridge Bridge
 }
 
 type Hub struct {
 	id            string
+	errorHandler  func(error)
 	messageBuffer int
 	writeTimeout  time.Duration
 	secret        []byte
-	// limiter       *rate.Limiter
 	bridge        Bridge
 	subscribersMu sync.RWMutex
 	subscribers   map[*subscriber]struct{}
@@ -42,7 +44,7 @@ type Hub struct {
 }
 
 type Bridge interface {
-	Send(string, string, []byte)
+	Send(string, string, []byte) error
 	Receive(string, func(string, []byte)) error
 	SendHeartbeat(string, string, []string) error
 	ReceiveHeartbeat(string, func(string, []string)) error
@@ -57,26 +59,28 @@ type subscriber struct {
 }
 
 func New(c Config) (*Hub, error) {
+	if c.ErrorHandler == nil {
+		c.ErrorHandler = func(err error) {
+			log.Print(fmt.Errorf("catbird: %w", err))
+		}
+	}
 	if c.MessageBuffer == 0 {
 		c.MessageBuffer = 16
 	}
 	if c.WriteTimeout == 0 {
 		c.WriteTimeout = time.Second * 5
 	}
-	// if c.Limiter == nil {
-	// 	c.Limiter = rate.NewLimiter(rate.Every(time.Millisecond*100), 8)
-	// }
 
 	h := &Hub{
 		id:            uuid.NewString(),
+		errorHandler:  c.ErrorHandler,
 		messageBuffer: c.MessageBuffer,
 		writeTimeout:  c.WriteTimeout,
 		secret:        c.Secret,
-		// limiter:       c.Limiter,
-		bridge:      c.Bridge,
-		subscribers: make(map[*subscriber]struct{}),
-		topics:      make(map[string]map[*subscriber]struct{}),
-		presenceMap: newPresenceMap(),
+		bridge:        c.Bridge,
+		subscribers:   make(map[*subscriber]struct{}),
+		topics:        make(map[string]map[*subscriber]struct{}),
+		presenceMap:   newPresenceMap(),
 	}
 
 	if h.bridge != nil {
@@ -159,7 +163,9 @@ func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request, token stri
 			select {
 			case <-ticker.C:
 				if h.bridge != nil {
-					h.bridge.SendHeartbeat(h.id, userID, topics)
+					if err := h.bridge.SendHeartbeat(h.id, userID, topics); err != nil {
+						h.errorHandler(err)
+					}
 				}
 				h.heartbeat(userID, topics)
 			case <-ctx.Done():
@@ -227,10 +233,10 @@ func (h *Hub) Presence(topic string) []string {
 }
 
 func (h *Hub) Send(topic string, msg []byte) {
-	// h.limiter.Wait(context.Background())
-
 	if h.bridge != nil {
-		h.bridge.Send(h.id, topic, msg)
+		if err := h.bridge.Send(h.id, topic, msg); err != nil {
+			h.errorHandler(err)
+		}
 	}
 
 	h.send(topic, msg)

@@ -2,7 +2,6 @@ package natsbridge
 
 import (
 	"encoding/json"
-	"log"
 	"strings"
 
 	"github.com/nats-io/nats.go"
@@ -32,18 +31,14 @@ func New(url string) (*Bridge, error) {
 	}, nil
 }
 
-// TODO handle error
-func (b *Bridge) Send(hubID, topic string, msg []byte) {
+func (b *Bridge) Send(hubID, topic string, msg []byte) error {
 	hdr := make(nats.Header)
 	hdr.Set("Hub-Id", hubID)
-	err := b.conn.PublishMsg(&nats.Msg{
+	return b.conn.PublishMsg(&nats.Msg{
 		Subject: "catbird.topic." + topic,
 		Header:  hdr,
 		Data:    msg,
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
 }
 
 func (b *Bridge) Receive(hubID string, fn func(string, []byte)) error {
