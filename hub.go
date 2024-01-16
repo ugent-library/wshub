@@ -43,9 +43,9 @@ type Hub struct {
 
 type Bridge interface {
 	Send(string, string, []byte)
-	Receive(string, func(string, []byte))
-	SendHeartbeat(string, string, []string)
-	ReceiveHeartbeat(string, func(string, []string))
+	Receive(string, func(string, []byte)) error
+	SendHeartbeat(string, string, []string) error
+	ReceiveHeartbeat(string, func(string, []string)) error
 }
 
 type subscriber struct {
@@ -56,7 +56,7 @@ type subscriber struct {
 	topics    []string
 }
 
-func New(c Config) *Hub {
+func New(c Config) (*Hub, error) {
 	if c.MessageBuffer == 0 {
 		c.MessageBuffer = 16
 	}
@@ -80,11 +80,15 @@ func New(c Config) *Hub {
 	}
 
 	if h.bridge != nil {
-		h.bridge.Receive(h.id, h.send)
-		h.bridge.ReceiveHeartbeat(h.id, h.heartbeat)
+		if err := h.bridge.Receive(h.id, h.send); err != nil {
+			return nil, err
+		}
+		if err := h.bridge.ReceiveHeartbeat(h.id, h.heartbeat); err != nil {
+			return nil, err
+		}
 	}
 
-	return h
+	return h, nil
 }
 
 func (h *Hub) Stop() {

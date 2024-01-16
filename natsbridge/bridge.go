@@ -32,7 +32,7 @@ func New(url string) (*Bridge, error) {
 	}, nil
 }
 
-// TODO error
+// TODO handle error
 func (b *Bridge) Send(hubID, topic string, msg []byte) {
 	hdr := make(nats.Header)
 	hdr.Set("Hub-Id", hubID)
@@ -46,21 +46,17 @@ func (b *Bridge) Send(hubID, topic string, msg []byte) {
 	}
 }
 
-// TODO error
-func (b *Bridge) Receive(hubID string, fn func(string, []byte)) {
+func (b *Bridge) Receive(hubID string, fn func(string, []byte)) error {
 	_, err := b.conn.Subscribe("catbird.topic.>", func(msg *nats.Msg) {
 		if msg.Header.Get("Hub-Id") != hubID {
 			topic := strings.TrimPrefix(msg.Subject, "catbird.topic.")
 			fn(topic, msg.Data)
 		}
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
+	return err
 }
 
-// TODO error
-func (b *Bridge) SendHeartbeat(hubID, userID string, topics []string) {
+func (b *Bridge) SendHeartbeat(hubID, userID string, topics []string) error {
 	hdr := make(nats.Header)
 	hdr.Set("Hub-Id", hubID)
 	data, _ := json.Marshal(&heartbeat{
@@ -68,18 +64,14 @@ func (b *Bridge) SendHeartbeat(hubID, userID string, topics []string) {
 		UserID: userID,
 		Topics: topics,
 	})
-	err := b.conn.PublishMsg(&nats.Msg{
+	return b.conn.PublishMsg(&nats.Msg{
 		Subject: "catbird.heartbeat",
 		Header:  hdr,
 		Data:    data,
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
 }
 
-// TODO error
-func (b *Bridge) ReceiveHeartbeat(hubID string, fn func(string, []string)) {
+func (b *Bridge) ReceiveHeartbeat(hubID string, fn func(string, []string)) error {
 	_, err := b.conn.Subscribe("catbird.heartbeat", func(msg *nats.Msg) {
 		if msg.Header.Get("Hub-Id") != hubID {
 			var hb heartbeat
@@ -87,7 +79,5 @@ func (b *Bridge) ReceiveHeartbeat(hubID string, fn func(string, []string)) {
 			fn(hb.UserID, hb.Topics)
 		}
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
+	return err
 }

@@ -25,10 +25,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	hub := catbird.New(catbird.Config{
+	hub, err := catbird.New(catbird.Config{
 		Secret: []byte("MuxdvYHUQyxbQ2jpf4QqR6Aydh068CZC"),
 		Bridge: bridge,
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer hub.Stop()
 
 	r := http.NewServeMux()
