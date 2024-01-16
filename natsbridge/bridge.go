@@ -37,7 +37,7 @@ func (b *Bridge) Send(hubID, topic string, msg []byte) {
 	hdr := make(nats.Header)
 	hdr.Set("Hub-Id", hubID)
 	err := b.conn.PublishMsg(&nats.Msg{
-		Subject: "hub.topic." + topic,
+		Subject: "catbird.topic." + topic,
 		Header:  hdr,
 		Data:    msg,
 	})
@@ -48,9 +48,9 @@ func (b *Bridge) Send(hubID, topic string, msg []byte) {
 
 // TODO error
 func (b *Bridge) Receive(hubID string, fn func(string, []byte)) {
-	_, err := b.conn.Subscribe("hub.topic.>", func(msg *nats.Msg) {
+	_, err := b.conn.Subscribe("catbird.topic.>", func(msg *nats.Msg) {
 		if msg.Header.Get("Hub-Id") != hubID {
-			topic := strings.TrimPrefix(msg.Subject, "hub.topic.")
+			topic := strings.TrimPrefix(msg.Subject, "catbird.topic.")
 			fn(topic, msg.Data)
 		}
 	})
@@ -69,7 +69,7 @@ func (b *Bridge) SendHeartbeat(hubID, userID string, topics []string) {
 		Topics: topics,
 	})
 	err := b.conn.PublishMsg(&nats.Msg{
-		Subject: "hub.heartbeat",
+		Subject: "catbird.heartbeat",
 		Header:  hdr,
 		Data:    data,
 	})
@@ -80,7 +80,7 @@ func (b *Bridge) SendHeartbeat(hubID, userID string, topics []string) {
 
 // TODO error
 func (b *Bridge) ReceiveHeartbeat(hubID string, fn func(string, []string)) {
-	_, err := b.conn.Subscribe("hub.heartbeat", func(msg *nats.Msg) {
+	_, err := b.conn.Subscribe("catbird.heartbeat", func(msg *nats.Msg) {
 		if msg.Header.Get("Hub-Id") != hubID {
 			var hb heartbeat
 			json.Unmarshal(msg.Data, &hb)

@@ -29,6 +29,7 @@ func main() {
 		Secret: []byte("MuxdvYHUQyxbQ2jpf4QqR6Aydh068CZC"),
 		Bridge: bridge,
 	})
+	defer hub.Stop()
 
 	r := http.NewServeMux()
 

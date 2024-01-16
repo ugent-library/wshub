@@ -87,6 +87,10 @@ func New(c Config) *Hub {
 	return h
 }
 
+func (h *Hub) Stop() {
+	h.presenceMap.Stop()
+}
+
 func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request, token string) error {
 	err := h.handleWebsocket(w, r, token)
 	if errors.Is(err, context.Canceled) ||
