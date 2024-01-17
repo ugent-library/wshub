@@ -23,7 +23,7 @@ go func() {
     for {
         select {
         case t := <-ticker.C:
-            hub.Send("clock", fmt.Println("Current time:", t))
+            hub.SendString("clock", fmt.Println("Current time", t))
         }
     }
 }()
