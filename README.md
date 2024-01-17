@@ -2,7 +2,7 @@
 
 # ugent-library/catbird
 
-A simple and robust Go websocket connection hub 
+A simple and robust Go websocket connection hub.
 
 ```go
 hub, _ := catbird.New(catbird.Config{Secret: secret})
