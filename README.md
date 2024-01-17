@@ -1,6 +1,6 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/ugent-library/catbird.svg)](https://pkg.go.dev/github.com/ugent-library/catbird)
 
-![CatBird](logo.svg "CatBird")
+![CatBird](catbird-banner.svg "CatBird banner")
 
 A simple and robust Go websocket connection hub.
 
