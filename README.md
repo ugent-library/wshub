@@ -8,10 +8,13 @@ A simple and robust Go websocket connection hub.
 hub, _ := catbird.New(catbird.Config{Secret: secret})
 defer hub.Stop()
 
-mux := http.NewServeMux()
+// ...
+
 mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-    hub.HandleWebsocket(w, r, r.URL.Query().Get("token"))
+    hub.HandleWebsocket(w, r, r.Context().Value("user").(string), []string{"clock"})
 })
+
+// ...
 
 ticker := time.NewTicker(time.Second)
 defer ticker.Stop()
@@ -25,7 +28,7 @@ go func() {
     }
 }()
 
-http.ListenAndServe("localhost:3000", mux);
+http.ListenAndServe("localhost:3000", mux)
 ```
 
 ## Install

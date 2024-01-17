@@ -1,6 +1,6 @@
-<div hx-ext="ws" ws-connect="/ws?token={{.Token}}">
+<div hx-ext="ws" ws-connect="/ws?user={{.User}}&room={{.Room}}">
     <div class="mb-2 float-end"
-        hx-get="/presence?token={{.Token}}"
+        hx-get="/presence?user={{.User}}&room={{.Room}}"
         hx-trigger="every 1s"
         hx-target="this"
         hx-swap="innerHTML"
@@ -10,7 +10,8 @@
 
     <form class="mb-2" hx-post="/chat" hx-swap="none">
         <div class="input-group mb-3">
-            <input type="hidden" name="token" value="{{.Token}}">
+            <input type="hidden" name="user" value="{{.User}}">
+            <input type="hidden" name="room" value="{{.Room}}">
             <input type="text" name="msg" class="form-control" placeholder="Type your message here" value="">
             <button class="btn btn-outline-primary" type="submit">Send</button>
         </div>

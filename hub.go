@@ -2,16 +2,10 @@ package catbird
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -25,9 +19,7 @@ type Config struct {
 	ErrorHandler  func(error)
 	MessageBuffer int
 	WriteTimeout  time.Duration
-	// Secret should be a random 256 bit key.
-	Secret []byte
-	Bridge Bridge
+	Bridge        Bridge
 }
 
 type Hub struct {
@@ -35,7 +27,6 @@ type Hub struct {
 	errorHandler  func(error)
 	messageBuffer int
 	writeTimeout  time.Duration
-	secret        []byte
 	bridge        Bridge
 	subscribersMu sync.RWMutex
 	subscribers   map[*subscriber]struct{}
@@ -76,7 +67,6 @@ func New(c Config) (*Hub, error) {
 		errorHandler:  c.ErrorHandler,
 		messageBuffer: c.MessageBuffer,
 		writeTimeout:  c.WriteTimeout,
-		secret:        c.Secret,
 		bridge:        c.Bridge,
 		subscribers:   make(map[*subscriber]struct{}),
 		topics:        make(map[string]map[*subscriber]struct{}),
@@ -99,8 +89,8 @@ func (h *Hub) Stop() {
 	h.presenceMap.Stop()
 }
 
-func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request, token string) error {
-	err := h.handleWebsocket(w, r, token)
+func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request, userID string, topics []string) error {
+	err := h.handleWebsocket(w, r, userID, topics)
 	if errors.Is(err, context.Canceled) ||
 		websocket.CloseStatus(err) == websocket.StatusNormalClosure ||
 		websocket.CloseStatus(err) == websocket.StatusGoingAway {
@@ -109,12 +99,7 @@ func (h *Hub) HandleWebsocket(w http.ResponseWriter, r *http.Request, token stri
 	return err
 }
 
-func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request, token string) error {
-	userID, topics, err := h.Decrypt(token)
-	if err != nil {
-		return err
-	}
-
+func (h *Hub) handleWebsocket(w http.ResponseWriter, r *http.Request, userID string, topics []string) error {
 	var mu sync.Mutex
 	var conn *websocket.Conn
 	var closed bool
@@ -242,6 +227,10 @@ func (h *Hub) Send(topic string, msg []byte) {
 	h.send(topic, msg)
 }
 
+func (h *Hub) SendString(topic string, msg string) {
+	h.Send(topic, []byte(msg))
+}
+
 func (h *Hub) send(topic string, msg []byte) {
 	h.subscribersMu.RLock()
 
@@ -256,71 +245,4 @@ func (h *Hub) send(topic string, msg []byte) {
 	}
 
 	h.subscribersMu.RUnlock()
-}
-
-func (h *Hub) Encrypt(userID string, topics []string) (string, error) {
-	plaintext := []byte(userID + "|" + strings.Join(topics, "|"))
-
-	// Create a new AES cipher block from the secret key.
-	block, err := aes.NewCipher(h.secret)
-	if err != nil {
-		return "", err
-	}
-
-	// Wrap the cipher block in Galois Counter Mode.
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("catbird: %w", err)
-	}
-
-	// Create a unique nonce containing 12 random bytes.
-	nonce := make([]byte, gcm.NonceSize())
-	_, err = io.ReadFull(rand.Reader, nonce)
-	if err != nil {
-		return "", fmt.Errorf("catbird: %w", err)
-	}
-
-	// Encrypt plaintext using aesGCM.Seal(). By passing the nonce as the first
-	// parameter, the ciphertext will be appended to the nonce so
-	// that the encrypted message will be in the format
-	// "{nonce}{encrypted message}".
-	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
-
-	return base64.URLEncoding.EncodeToString(ciphertext), nil
-}
-
-func (h *Hub) Decrypt(token string) (string, []string, error) {
-	ciphertext, err := base64.URLEncoding.DecodeString(token)
-	if err != nil {
-		return "", nil, fmt.Errorf("catbird: %w", err)
-	}
-
-	// Create a new AES cipher block from the secret key.
-	block, err := aes.NewCipher(h.secret)
-	if err != nil {
-		return "", nil, fmt.Errorf("catbird: %w", err)
-	}
-
-	// Wrap the cipher block in Galois Counter Mode.
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", nil, fmt.Errorf("catbird: %w", err)
-	}
-
-	nonceSize := gcm.NonceSize()
-
-	// Avoid potential index out of range panic in the next step.
-	if len(ciphertext) < nonceSize {
-		return "", nil, errors.New("catbird: invalid secret")
-	}
-
-	// Split ciphertext in nonce and encrypted data and use gcm.Open() to
-	// decrypt and authenticate the data.
-	plaintext, err := gcm.Open(nil, ciphertext[:nonceSize], ciphertext[nonceSize:], nil)
-	if err != nil {
-		return "", nil, fmt.Errorf("catbird: %w", err)
-	}
-
-	parts := strings.Split(string(plaintext), "|")
-	return parts[0], parts[1:], nil
 }
